@@ -1,17 +1,22 @@
 #include <pebble.h>
 
 #define STAR_COUNT 40
+#define MAX_FLOW_SPEED 1
     
 static Window *window;
 static Layer *starfield_layer;
 static TextLayer *time_layer;
-static AppTimer *timer;
+static AppTimer *animation_timer;
+static AppTimer *end_tap_timer;
 static uint32_t delta = 40;
+static uint32_t tap_duration = 3000;
+static float flow_speed = 0;
+static float flow_acceleration = 0;
 
 struct Star {
-    short x;
-    short y;
-    short z;
+    float x;
+    float y;
+    float z;
 };
 
 struct Star *stars[STAR_COUNT];
@@ -41,7 +46,7 @@ static void respawn_star(struct Star *star) { // TODO: consider moving into upda
 
 static void update_starfield() {
     for (int i = 0; i < STAR_COUNT; i++) {
-        stars[i]->x += stars[i]->z / 2 + 1;
+        stars[i]->x += flow_speed * stars[i]->z;
         if (stars[i]->x > 144) respawn_star(stars[i]);
     }
     layer_mark_dirty(starfield_layer);
@@ -65,13 +70,35 @@ static void update_time(struct tm *tick_time) {
     text_layer_set_text(time_layer, buffer);
 }
 
-static void timer_callback(void *data) {
-    update_starfield();
-    timer = app_timer_register(delta, timer_callback, 0);
+static void animate(void *data) {
+    flow_speed += flow_acceleration;
+	if (flow_speed > MAX_FLOW_SPEED) {
+		flow_speed = MAX_FLOW_SPEED;
+		flow_acceleration = 0;
+	}
+    if (flow_speed > 0) {
+        update_starfield();
+        animation_timer = app_timer_register(delta, animate, 0);
+    }
 }
 
 static void tick_handler(struct tm *tick_time, TimeUnits units_changed) {
     update_time(tick_time);
+}
+
+/**************** Activity ****************/
+static void end_tap_handler(void *data) {
+	flow_acceleration = -0.01;
+	end_tap_timer = NULL;
+}
+
+static void tap_handler(AccelAxisType axis, int32_t direction) {
+	if (end_tap_timer == NULL) {
+		end_tap_timer = app_timer_register(tap_duration, end_tap_handler, 0);
+		if (flow_speed < 0.01) animation_timer = app_timer_register(delta, animate, 0);
+	}
+	else app_timer_reschedule(end_tap_timer, tap_duration);
+    flow_acceleration = 0.03;
 }
 
 /**************** Window ****************/
@@ -89,7 +116,7 @@ static void window_load(Window *window) {
     time_t raw_time = time(NULL);
     struct tm *tick_time = localtime(&raw_time);
     update_time(tick_time);
-    timer = app_timer_register(delta, timer_callback, 0);
+    //animation_timer = app_timer_register(delta, animate, 0);
 }
 
 static void window_unload(Window *window) {
@@ -106,6 +133,7 @@ static void init() {
     });
     create_starfield();
     tick_timer_service_subscribe(MINUTE_UNIT, tick_handler);
+    accel_tap_service_subscribe(tap_handler);
     window_stack_push(window, true);
 }
 
