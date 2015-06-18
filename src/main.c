@@ -1,7 +1,6 @@
 #include <pebble.h>
 
 #define STAR_COUNT 40
-#define MAX_FLOW_SPEED 1
     
 static Window *window;
 static Layer *starfield_layer;
@@ -10,8 +9,15 @@ static AppTimer *animation_timer;
 static AppTimer *end_tap_timer;
 static uint32_t delta = 40;
 static uint32_t tap_duration = 3000;
-static float flow_speed = 0;
-static float flow_acceleration = 0.03;
+
+struct XYZ {
+	float x;
+    float y;
+    float z;
+};
+static struct XYZ *flow;
+static struct XYZ *desired_flow;
+static struct XYZ *flow_acceleration;
 
 struct Star {
     float x;
@@ -19,8 +25,7 @@ struct Star {
     float z;
 	float size;
 };
-
-struct Star *stars[STAR_COUNT];
+static struct Star *stars[STAR_COUNT];
 
 /**************** Starfield ****************/
 static struct Star* create_star() { // TODO: consider moving into create_starfield()
@@ -32,25 +37,28 @@ static struct Star* create_star() { // TODO: consider moving into create_starfie
 	return star;
 }
 
-static void create_starfield() {
-    for (int i = 0; i < STAR_COUNT; i++) stars[i] = create_star();
-}
-
-static void destroy_starfield() {
-    for (int i = 0; i < STAR_COUNT; i++) free(stars[i]);
-}
-
-static void respawn_star(struct Star *star) { // TODO: consider moving into update_starfield()
-	star->x = 0;
-	star->y = rand() % 168;
+static void respawn_star(struct Star *star) { // TODO: consider moving into update_starfield()	
+	short position = rand() % (144 + 168);
+	if (position <= 144) {
+		star->x = position;
+		if (flow->y >= 0) star->y = 0;
+		else star->y = 168;
+	}
+	else {
+		if (flow->x >= 0) star->x = 0;
+		else star->x = 144;
+		star->y = position - 144;		
+	}
 	star->z = (float)rand() / RAND_MAX * 6;
 	star->size = (float)rand() / RAND_MAX + 0.5;
 }
 
 static void update_starfield() {
     for (int i = 0; i < STAR_COUNT; i++) {
-        stars[i]->x += flow_speed * stars[i]->z;
-        if (stars[i]->x > 144) respawn_star(stars[i]);
+		struct Star *star = stars[i];
+        star->x += flow->x * star->z;
+		star->y += flow->y * star->z;
+        if ((star->x > 144) || (star->x < 0) || (star->y > 168) || (star->y < 0)) respawn_star(star);
     }
     layer_mark_dirty(starfield_layer);
 }
@@ -62,6 +70,23 @@ static void draw_starfield(Layer *layer, GContext* ctx) {
 		int16_t apparent_size = star->z * star->size + 1;
         graphics_fill_rect(ctx, GRect(star->x, star->y, apparent_size, apparent_size), 0, GCornerNone);
     }
+}
+
+static void create_starfield() {
+	flow = malloc(sizeof(struct XYZ));
+	flow->x = 0;
+	flow->y = 0;
+	desired_flow = malloc(sizeof(struct XYZ));
+	desired_flow->x = (float)rand() / RAND_MAX - 0.5;
+	desired_flow->y = (float)rand() / RAND_MAX - 0.5;
+	flow_acceleration = malloc(sizeof(struct XYZ));
+	flow_acceleration->x = desired_flow->x / 1000 * delta;
+	flow_acceleration->y = desired_flow->y / 1000 * delta;
+    for (int i = 0; i < STAR_COUNT; i++) stars[i] = create_star();
+}
+
+static void destroy_starfield() {
+    for (int i = 0; i < STAR_COUNT; i++) free(stars[i]);
 }
 
 /**************** Time ****************/
@@ -76,12 +101,17 @@ static void update_time(struct tm *tick_time) {
 }
 
 static void animate(void *data) {
-    flow_speed += flow_acceleration;
-	if (flow_speed > MAX_FLOW_SPEED) {
-		flow_speed = MAX_FLOW_SPEED;
-		flow_acceleration = 0;
+	flow->x += flow_acceleration->x;
+	if (((flow_acceleration->x > 0) && (flow->x > desired_flow->x)) || ((flow_acceleration->x < 0) && (flow->x < desired_flow->x))) {
+		flow->x = desired_flow->x;
+		flow_acceleration->x = 0;
 	}
-    if (flow_speed > 0) {
+	flow->y += flow_acceleration->y;
+	if (((flow_acceleration->y > 0) && (flow->y > desired_flow->y)) || ((flow_acceleration->y < 0) && (flow->y < desired_flow->y))) {
+		flow->y = desired_flow->y;
+		flow_acceleration->y = 0;
+	}
+    if ((flow->x > 0.00001) || (flow->x < 0.00001) || (flow->y > 0.00001) || (flow->y < 0.00001)) {
         update_starfield();
         animation_timer = app_timer_register(delta, animate, 0);
     }
@@ -93,15 +123,21 @@ static void tick_handler(struct tm *tick_time, TimeUnits units_changed) {
 
 /**************** User Input ****************/
 static void end_tap_handler(void *data) {
-	flow_acceleration = -0.01;
+	desired_flow->x = 0;
+	desired_flow->y = 0;
+	flow_acceleration->x = -flow->x / 1000 * delta;
+	flow_acceleration->y = -flow->y / 1000 * delta;
 	end_tap_timer = NULL;
 }
 
 static void tap_handler(AccelAxisType axis, int32_t direction) {
-	flow_acceleration = 0.03;
+	desired_flow->x = (float)rand() / RAND_MAX - 0.5;
+	desired_flow->y = (float)rand() / RAND_MAX - 0.5;
+	flow_acceleration->x = (desired_flow->x - flow->x) / 1000 * delta;
+	flow_acceleration->y = (desired_flow->y - flow->y) / 1000 * delta;
 	if (end_tap_timer == NULL) {
 		end_tap_timer = app_timer_register(tap_duration, end_tap_handler, 0);
-		if (flow_speed < 0.01) animation_timer = app_timer_register(delta, animate, 0);
+		if ((flow->x > 0.00001) || (flow->x < 0.00001) || (flow->y > 0.00001) || (flow->y < 0.00001)) animation_timer = app_timer_register(delta, animate, 0);
 	}
 	else app_timer_reschedule(end_tap_timer, tap_duration);
 }
