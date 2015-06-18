@@ -11,12 +11,13 @@ static AppTimer *end_tap_timer;
 static uint32_t delta = 40;
 static uint32_t tap_duration = 3000;
 static float flow_speed = 0;
-static float flow_acceleration = 0;
+static float flow_acceleration = 0.03;
 
 struct Star {
     float x;
     float y;
     float z;
+	float size;
 };
 
 struct Star *stars[STAR_COUNT];
@@ -26,7 +27,8 @@ static struct Star* create_star() { // TODO: consider moving into create_starfie
     struct Star *star = malloc(sizeof(struct Star));
 	star->x = rand() % 144;
 	star->y = rand() % 168;
-	star->z = rand() % 6 + 1;
+	star->z = (float)rand() / RAND_MAX * 6;
+	star->size = (float)rand() / RAND_MAX + 0.5;
 	return star;
 }
 
@@ -41,7 +43,8 @@ static void destroy_starfield() {
 static void respawn_star(struct Star *star) { // TODO: consider moving into update_starfield()
 	star->x = 0;
 	star->y = rand() % 168;
-	star->z = rand() % 6 + 1;
+	star->z = (float)rand() / RAND_MAX * 6;
+	star->size = (float)rand() / RAND_MAX + 0.5;
 }
 
 static void update_starfield() {
@@ -55,7 +58,9 @@ static void update_starfield() {
 static void draw_starfield(Layer *layer, GContext* ctx) {
     graphics_context_set_fill_color(ctx, GColorWhite);
     for(int i = 0; i < STAR_COUNT; i++) {
-        graphics_fill_rect(ctx, GRect(stars[i]->x, stars[i]->y, stars[i]->z, stars[i]->z), 0, GCornerNone);
+		struct Star *star = stars[i];
+		int16_t apparent_size = star->z * star->size + 1;
+        graphics_fill_rect(ctx, GRect(star->x, star->y, apparent_size, apparent_size), 0, GCornerNone);
     }
 }
 
@@ -86,19 +91,19 @@ static void tick_handler(struct tm *tick_time, TimeUnits units_changed) {
     update_time(tick_time);
 }
 
-/**************** Activity ****************/
+/**************** User Input ****************/
 static void end_tap_handler(void *data) {
 	flow_acceleration = -0.01;
 	end_tap_timer = NULL;
 }
 
 static void tap_handler(AccelAxisType axis, int32_t direction) {
+	flow_acceleration = 0.03;
 	if (end_tap_timer == NULL) {
 		end_tap_timer = app_timer_register(tap_duration, end_tap_handler, 0);
 		if (flow_speed < 0.01) animation_timer = app_timer_register(delta, animate, 0);
 	}
 	else app_timer_reschedule(end_tap_timer, tap_duration);
-    flow_acceleration = 0.03;
 }
 
 /**************** Window ****************/
@@ -116,7 +121,8 @@ static void window_load(Window *window) {
     time_t raw_time = time(NULL);
     struct tm *tick_time = localtime(&raw_time);
     update_time(tick_time);
-    //animation_timer = app_timer_register(delta, animate, 0);
+    animation_timer = app_timer_register(delta, animate, 0);
+	end_tap_timer = app_timer_register(tap_duration, end_tap_handler, 0);
 }
 
 static void window_unload(Window *window) {
