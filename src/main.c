@@ -1,7 +1,14 @@
 #include <pebble.h>
 
 #define STAR_COUNT 40
-    
+#define INT_PRECISION 1000
+#define X_MAX (144 * INT_PRECISION)
+#define Y_MAX (168 * INT_PRECISION)
+#define Z_MAX (64 * INT_PRECISION)
+#define STAR_SIZE_MAX (2 * INT_PRECISION)
+#define FLOW_MAX (64 * INT_PRECISION)
+#define PIXELS_MAX 8
+	
 static Window *window;
 static Layer *starfield_layer;
 static TextLayer *time_layer;
@@ -11,54 +18,54 @@ static uint32_t delta = 40;
 static uint32_t tap_duration = 3000;
 
 struct XYZ {
-	float x;
-    float y;
-    float z;
+	int x;
+    int y;
+    int z;
 };
 static struct XYZ *flow;
 static struct XYZ *desired_flow;
 static struct XYZ *flow_acceleration;
 
 struct Star {
-    float x;
-    float y;
-    float z;
-	float size;
+    int x;
+    int y;
+    int z;
+	int size;
 };
 static struct Star *stars[STAR_COUNT];
 
 /**************** Starfield ****************/
 static struct Star* create_star() { // TODO: consider moving into create_starfield()
     struct Star *star = malloc(sizeof(struct Star));
-	star->x = rand() % 144;
-	star->y = rand() % 168;
-	star->z = (float)rand() / RAND_MAX * 6;
-	star->size = (float)rand() / RAND_MAX + 0.5;
+	star->x = rand() % X_MAX;
+	star->y = rand() % Y_MAX;
+	star->z = rand() % Z_MAX;
+	star->size = rand() % STAR_SIZE_MAX;
 	return star;
 }
 
 static void respawn_star(struct Star *star) { // TODO: consider moving into update_starfield()	
-	short position = rand() % (144 + 168);
-	if (position <= 144) {
+	int position = rand() % (X_MAX + Y_MAX);
+	if (position <= X_MAX) {
 		star->x = position;
 		if (flow->y >= 0) star->y = 0;
-		else star->y = 168;
+		else star->y = Y_MAX;
 	}
 	else {
 		if (flow->x >= 0) star->x = 0;
-		else star->x = 144;
-		star->y = position - 144;		
+		else star->x = X_MAX;
+		star->y = position - X_MAX;		
 	}
-	star->z = (float)rand() / RAND_MAX * 6;
-	star->size = (float)rand() / RAND_MAX + 0.5;
+	star->z = rand() % Z_MAX;
+	star->size = rand() % STAR_SIZE_MAX;
 }
 
 static void update_starfield() {
     for (int i = 0; i < STAR_COUNT; i++) {
-		struct Star *star = stars[i];
-        star->x += flow->x * star->z;
-		star->y += flow->y * star->z;
-        if ((star->x > 144) || (star->x < 0) || (star->y > 168) || (star->y < 0)) respawn_star(star);
+		struct Star *star = stars[i]; // TODO: necessary? check efficiency
+        star->x += flow->x * star->z / Z_MAX;
+		star->y += flow->y * star->z / Z_MAX;
+        if ((star->x > X_MAX) || (star->x < 0) || (star->y > Y_MAX) || (star->y < 0)) respawn_star(star);
     }
     layer_mark_dirty(starfield_layer);
 }
@@ -67,8 +74,8 @@ static void draw_starfield(Layer *layer, GContext* ctx) {
     graphics_context_set_fill_color(ctx, GColorWhite);
     for(int i = 0; i < STAR_COUNT; i++) {
 		struct Star *star = stars[i];
-		int16_t apparent_size = star->z * star->size + 1;
-        graphics_fill_rect(ctx, GRect(star->x, star->y, apparent_size, apparent_size), 0, GCornerNone);
+		int apparent_size = star->size * star->z * PIXELS_MAX / STAR_SIZE_MAX / Z_MAX + 1;
+        graphics_fill_rect(ctx, GRect(star->x / INT_PRECISION, star->y / INT_PRECISION, apparent_size, apparent_size), 0, GCornerNone);
     }
 }
 
@@ -77,11 +84,11 @@ static void create_starfield() {
 	flow->x = 0;
 	flow->y = 0;
 	desired_flow = malloc(sizeof(struct XYZ));
-	desired_flow->x = (float)rand() / RAND_MAX - 0.5;
-	desired_flow->y = (float)rand() / RAND_MAX - 0.5;
+	desired_flow->x = rand() % FLOW_MAX - FLOW_MAX / 2;
+	desired_flow->y = rand() % FLOW_MAX - FLOW_MAX / 2;
 	flow_acceleration = malloc(sizeof(struct XYZ));
-	flow_acceleration->x = desired_flow->x / 1000 * delta;
-	flow_acceleration->y = desired_flow->y / 1000 * delta;
+	flow_acceleration->x = desired_flow->x * (int)delta / 2000;
+	flow_acceleration->y = desired_flow->y * (int)delta / 2000;
     for (int i = 0; i < STAR_COUNT; i++) stars[i] = create_star();
 }
 
@@ -111,7 +118,7 @@ static void animate(void *data) {
 		flow->y = desired_flow->y;
 		flow_acceleration->y = 0;
 	}
-    if ((flow->x > 0.00001) || (flow->x < 0.00001) || (flow->y > 0.00001) || (flow->y < 0.00001)) {
+    if ((flow->x != 0) || (flow->y != 0)) {
         update_starfield();
         animation_timer = app_timer_register(delta, animate, 0);
     }
@@ -125,19 +132,19 @@ static void tick_handler(struct tm *tick_time, TimeUnits units_changed) {
 static void end_tap_handler(void *data) {
 	desired_flow->x = 0;
 	desired_flow->y = 0;
-	flow_acceleration->x = -flow->x / 1000 * delta;
-	flow_acceleration->y = -flow->y / 1000 * delta;
+	flow_acceleration->x = -flow->x * (int)delta / 2000;
+	flow_acceleration->y = -flow->y * (int)delta / 2000;
 	end_tap_timer = NULL;
 }
 
 static void tap_handler(AccelAxisType axis, int32_t direction) {
-	desired_flow->x = (float)rand() / RAND_MAX - 0.5;
-	desired_flow->y = (float)rand() / RAND_MAX - 0.5;
-	flow_acceleration->x = (desired_flow->x - flow->x) / 1000 * delta;
-	flow_acceleration->y = (desired_flow->y - flow->y) / 1000 * delta;
+	desired_flow->x = rand() % FLOW_MAX - FLOW_MAX / 2;
+	desired_flow->y = rand() % FLOW_MAX - FLOW_MAX / 2;
+	flow_acceleration->x = (desired_flow->x - flow->x) * (int)delta / 2000;
+	flow_acceleration->y = (desired_flow->y - flow->y) * (int)delta / 2000;
 	if (end_tap_timer == NULL) {
 		end_tap_timer = app_timer_register(tap_duration, end_tap_handler, 0);
-		if ((flow->x > 0.00001) || (flow->x < 0.00001) || (flow->y > 0.00001) || (flow->y < 0.00001)) animation_timer = app_timer_register(delta, animate, 0);
+		if ((flow->x == 0) && (flow->y == 0)) animation_timer = app_timer_register(delta, animate, 0);
 	}
 	else app_timer_reschedule(end_tap_timer, tap_duration);
 }
