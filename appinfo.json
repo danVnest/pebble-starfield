@@ -1,7 +1,9 @@
 {
-    "appKeys": {},
+    "appKeys": {
+        "animate": 0
+    },
     "capabilities": [
-        ""
+        "configurable"
     ],
     "companyName": "Daniel Vogelnest",
     "longName": "Starfield",
@@ -22,7 +24,7 @@
         "basalt"
     ],
     "uuid": "2bc77e27-9f42-4064-a13b-589ec3e139da",
-    "versionLabel": "0.3",
+    "versionLabel": "0.5",
     "watchapp": {
         "watchface": true
     }
