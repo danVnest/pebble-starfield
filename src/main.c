@@ -1,4 +1,5 @@
 #include <pebble.h>
+#include <settings.h>
 
 #define STAR_COUNT 40
 #define INT_PRECISION 1000
@@ -9,16 +10,6 @@
 #define FLOW_MAX (64 * INT_PRECISION)
 #define PIXELS_MAX 8
 
-enum STORAGE_KEYS {
-	STORAGE_SETTINGS
-};
-
-enum SETTING_KEYS {
-	SETTING_ANIMATE,
-	SETTING_KEY_COUNT
-};
-
-static uint8_t settings[SETTING_KEY_COUNT];
 static Window *window;
 static Layer *starfield_layer;
 static TextLayer *time_layer;
@@ -27,8 +18,6 @@ static AppTimer *animation_timer;
 static AppTimer *end_tap_timer;
 static uint32_t delta = 40;
 static uint32_t tap_duration = 3000;
-static AppSync app_sync;
-static uint8_t sync_buffer[32];
 
 struct XYZ {
 	int x;
@@ -144,7 +133,7 @@ static void tick_handler(struct tm *tick_time, TimeUnits units_changed) {
 
 /**************** User Input ****************/
 static void end_tap_handler(void *data) { // TODO: put function into animate()?
-	if (settings[SETTING_ANIMATE] == 2) {
+	if (get_setting(SETTING_ANIMATE) == 2) {
 		desired_flow->x = rand() % FLOW_MAX - FLOW_MAX / 2;
 		desired_flow->y = rand() % FLOW_MAX - FLOW_MAX / 2;
 		end_tap_timer = app_timer_register(tap_duration, end_tap_handler, 0);
@@ -168,17 +157,6 @@ static void tap_handler(AccelAxisType axis, int32_t direction) {
 		if ((flow->x == 0) && (flow->y == 0)) animation_timer = app_timer_register(delta, animate, 0);
 	}
 	else app_timer_reschedule(end_tap_timer, tap_duration);
-}
-
-/**************** App Communication ****************/
-static void sync_changed_handler(const uint32_t key, const Tuple *new_tuple, const Tuple *old_tuple, void *context) {
-	settings[key] = new_tuple->value->int8;
-	animation_timer = app_timer_register(delta, animate, 0);
-	end_tap_timer = app_timer_register(0, end_tap_handler, 0);
-}
-
-static void sync_error_handler(DictionaryResult dict_error, AppMessageResult app_message_error, void *context) {
-	APP_LOG(APP_LOG_LEVEL_ERROR, "sync error!");
 }
 
 /**************** Window ****************/
@@ -206,11 +184,8 @@ static void window_unload(Window *window) {
 }
 
 /**************** Main ****************/
-static void init() {
-	if (persist_exists(STORAGE_SETTINGS)) persist_read_data(STORAGE_SETTINGS, settings, persist_get_size(STORAGE_SETTINGS));
-	else {
-		settings[SETTING_ANIMATE] = 1;
-	}
+static void initialise() {
+	sync_settings();
 	window = window_create();
 	window_set_window_handlers(window, (WindowHandlers) {
 		.load = window_load,
@@ -218,29 +193,36 @@ static void init() {
 	});
 	create_starfield();
 	tick_timer_service_subscribe(MINUTE_UNIT, tick_handler);
-	if (settings[SETTING_ANIMATE] != 0) {
+	if (get_setting(SETTING_ANIMATE) != 0) {
 		accel_tap_service_subscribe(tap_handler);
 		animation_timer = app_timer_register(delta, animate, 0);
 		end_tap_timer = app_timer_register(tap_duration, end_tap_handler, 0);
 	}
 	window_stack_push(window, true);
-	app_message_open(app_message_inbox_size_maximum(), app_message_outbox_size_maximum());
-	Tuplet settings_sync[] = {
-		TupletInteger(SETTING_ANIMATE, settings[SETTING_ANIMATE])
-	};
-	app_sync_init(&app_sync, sync_buffer, sizeof(sync_buffer), settings_sync, ARRAY_LENGTH(settings_sync), sync_changed_handler, sync_error_handler, NULL);
 }
 
-static void deinit() {
+static void cleanup() {
 	destroy_starfield();
 	tick_timer_service_unsubscribe();
 	window_destroy(window);
-	app_sync_deinit(&app_sync);
-	persist_write_data(STORAGE_SETTINGS, settings, sizeof(settings));
+	save_settings();
+}
+
+void restart() {
+	window_stack_pop_all(true);
+	destroy_starfield();
+	//TODO: animate between
+	create_starfield();
+	if (get_setting(SETTING_ANIMATE) != 0) {
+		accel_tap_service_subscribe(tap_handler);
+		animation_timer = app_timer_register(delta, animate, 0);
+		end_tap_timer = app_timer_register(tap_duration, end_tap_handler, 0);
+	}
+	window_stack_push(window, true);
 }
 
 int main(void) {
-	init();
+	initialise();
 	app_event_loop();
-	deinit();
+	cleanup();
 }
