@@ -12,7 +12,7 @@
 enum STORAGE_KEYS {
 	STORAGE_SETTINGS
 };
-	
+
 enum SETTING_KEYS {
 	SETTING_ANIMATE,
 	SETTING_KEY_COUNT
@@ -22,6 +22,7 @@ static uint8_t settings[SETTING_KEY_COUNT];
 static Window *window;
 static Layer *starfield_layer;
 static TextLayer *time_layer;
+static GFont font;
 static AppTimer *animation_timer;
 static AppTimer *end_tap_timer;
 static uint32_t delta = 40;
@@ -107,16 +108,16 @@ static void create_starfield() {
 
 static void destroy_starfield() {
 	for (int i = 0; i < STAR_COUNT; i++) free(stars[i]);
+	free(flow);
+	free(desired_flow);
+	free(flow_acceleration);
 }
 
 /**************** Time ****************/
 static void update_time(struct tm *tick_time) {
 	static char buffer[] = "00:00";
-	if(clock_is_24h_style() == true) {
-		strftime(buffer, sizeof("00:00"), "%H:%M", tick_time);
-	} else {
-		strftime(buffer, sizeof("00:00"), "%I:%M", tick_time);
-	}
+	if(clock_is_24h_style() == true) strftime(buffer, sizeof("00:00"), "%H:%M", tick_time);
+	else strftime(buffer, sizeof("00:00"), "%I:%M", tick_time);
 	text_layer_set_text(time_layer, buffer);
 }
 
@@ -177,7 +178,7 @@ static void sync_changed_handler(const uint32_t key, const Tuple *new_tuple, con
 }
 
 static void sync_error_handler(DictionaryResult dict_error, AppMessageResult app_message_error, void *context) {
-  APP_LOG(APP_LOG_LEVEL_ERROR, "sync error!");
+	APP_LOG(APP_LOG_LEVEL_ERROR, "sync error!");
 }
 
 /**************** Window ****************/
@@ -187,7 +188,8 @@ static void window_load(Window *window) {
 	layer_set_update_proc(starfield_layer, draw_starfield);
 	layer_add_child(window_get_root_layer(window), starfield_layer);
 	time_layer = text_layer_create(GRect(0, 55, 144, 50));
-	text_layer_set_font(time_layer, fonts_load_custom_font(resource_get_handle(RESOURCE_ID_FONT_IMAGINE_38)));
+	font = fonts_load_custom_font(resource_get_handle(RESOURCE_ID_FONT_IMAGINE_38));
+	text_layer_set_font(time_layer, font);
 	text_layer_set_text_color(time_layer, GColorWhite);
 	text_layer_set_background_color(time_layer, GColorClear);
 	text_layer_set_text_alignment(time_layer, GTextAlignmentCenter);
@@ -200,6 +202,7 @@ static void window_load(Window *window) {
 static void window_unload(Window *window) {
 	layer_destroy(starfield_layer);
 	text_layer_destroy(time_layer);
+	fonts_unload_custom_font(font);
 }
 
 /**************** Main ****************/
